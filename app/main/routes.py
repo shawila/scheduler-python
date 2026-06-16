@@ -2,7 +2,7 @@ from datetime import datetime
 from flask import Blueprint, redirect, session, request, jsonify
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
+from app.google_calendar import credentials_from_customer
 from app.models.customer import Customer
 from app.extensions import db
 import os
@@ -27,17 +27,6 @@ def _build_flow():
         CLIENT_SECRETS_FILE,
         scopes=SCOPES,
         redirect_uri=REDIRECT_URI,
-    )
-
-
-def _credentials_from_customer(customer):
-    return Credentials(
-        token=customer.token,
-        refresh_token=customer.refresh_token,
-        token_uri=customer.token_uri,
-        client_id=customer.client_id,
-        client_secret=customer.client_secret,
-        scopes=customer.scopes.split(','),
     )
 
 
@@ -100,7 +89,7 @@ def get_busy_hours():
     if not customer:
         return jsonify({'error': 'Customer not found'}), 404
 
-    credentials = _credentials_from_customer(customer)
+    credentials = credentials_from_customer(customer)
     service = build('calendar', 'v3', credentials=credentials)
 
     time_min = date.strftime('%Y-%m-%dT00:00:00Z')
