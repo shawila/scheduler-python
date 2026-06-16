@@ -1,0 +1,27 @@
+from datetime import datetime
+import dns.resolver
+from app.slots import SLOT_DURATION_MINUTES, MAX_BOOKING_DURATION_MINUTES
+
+
+def is_slot_aligned(dt: datetime) -> bool:
+    return dt.minute in (0, 30) and dt.second == 0
+
+
+def validate_booking_duration(start: datetime, end: datetime) -> tuple:
+    if end <= start:
+        return False, 'End time must be after start time'
+    duration_minutes = int((end - start).total_seconds() / 60)
+    if duration_minutes % SLOT_DURATION_MINUTES != 0:
+        return False, f'Duration must be a multiple of {SLOT_DURATION_MINUTES} minutes'
+    if duration_minutes > MAX_BOOKING_DURATION_MINUTES:
+        return False, f'Duration cannot exceed {MAX_BOOKING_DURATION_MINUTES} minutes'
+    return True, ''
+
+
+def check_mx_record(email: str) -> bool:
+    domain = email.split('@')[-1]
+    try:
+        records = dns.resolver.resolve(domain, 'MX')
+        return len(records) > 0
+    except Exception:
+        return False
