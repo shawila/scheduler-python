@@ -82,6 +82,56 @@ GET /get-busy-hours?email=user@example.com&date=2024-08-01
 ]
 ```
 
+### `POST /book`
+
+Submits a booking request. Validates slot alignment, duration, store existence, and guest email domain before creating a pending booking. Sends a confirmation email to the guest.
+
+| Field | Required | Description |
+|---|---|---|
+| `store_email` | yes | Must match a connected store in the system |
+| `guest_email` | yes | Guest's email — domain is MX-validated |
+| `guest_name` | yes | Guest's display name |
+| `date` | yes | `YYYY-MM-DD` |
+| `start_time` | yes | `HH:MM`, aligned to 30-minute slots (00 or 30) |
+| `end_time` | yes | `HH:MM`, aligned to 30-minute slots (00 or 30) |
+
+Rules: duration must be a multiple of 30 minutes and cannot exceed 3 hours.
+
+**Example:**
+```
+POST /book
+{
+  "store_email": "store@example.com",
+  "guest_email": "guest@example.com",
+  "guest_name": "John Doe",
+  "date": "2024-08-02",
+  "start_time": "11:00",
+  "end_time": "12:30"
+}
+```
+
+**Response:** `200 {"message": "Confirmation email sent to guest@example.com"}`
+
+---
+
+### `GET /confirm-booking/<token>`
+
+Confirms a pending booking. Creates a Google Calendar event on the store's calendar with the guest added as an attendee — Google sends the guest a native calendar invite.
+
+- `404` if token is not found
+- `410 Gone` if the confirmation link has expired (24-hour TTL)
+- `200` with event details on success:
+
+```json
+{
+  "event_id": "google_calendar_event_id",
+  "title": "Appointment",
+  "start": "2024-08-02T11:00:00Z",
+  "end": "2024-08-02T12:30:00Z",
+  "html_link": "https://calendar.google.com/event?eid=..."
+}
+```
+
 ## Standalone CLI
 
 `main.py` authenticates via a local browser flow and prints free 30-minute slots for today:
