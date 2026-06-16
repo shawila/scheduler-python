@@ -87,7 +87,7 @@ class TestPostBook:
              patch('app.booking.routes.send_confirmation_email') as mock_email:
             response = client.post('/book', json=VALID_PAYLOAD)
 
-        assert response.status_code == 200
+        assert response.status_code == 201
         assert 'guest@example.com' in response.json['message']
         mock_email.assert_called_once()
 

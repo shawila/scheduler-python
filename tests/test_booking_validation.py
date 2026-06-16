@@ -62,6 +62,9 @@ class TestCheckMxRecord:
         with patch('app.booking.validation.dns.resolver.resolve', side_effect=Exception('Timeout')):
             assert check_mx_record('guest@example.com') is False
 
+    def test_email_without_at_sign_returns_false(self):
+        assert check_mx_record('noatsign') is False
+
 
 from unittest.mock import call, MagicMock
 from app.booking.email import send_confirmation_email
