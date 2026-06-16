@@ -32,7 +32,7 @@ def book():
     start_dt = datetime(date.year, date.month, date.day, start_time.hour, start_time.minute)
     end_dt = datetime(date.year, date.month, date.day, end_time.hour, end_time.minute)
 
-    if not is_slot_aligned(start_dt):
+    if not is_slot_aligned(start_dt) or not is_slot_aligned(end_dt):
         return jsonify({'error': 'Times must be aligned to 30-minute slots (minutes must be 00 or 30)'}), 400
 
     valid, error = validate_booking_duration(start_dt, end_dt)
@@ -86,8 +86,20 @@ def confirm_booking(token):
         return jsonify({'error': 'Confirmation link has expired'}), 410
 
     customer = Customer.query.filter_by(email=pending.store_email).first()
+    if not customer:
+        return jsonify({'error': 'Store account not found'}), 400
     credentials = credentials_from_customer(customer)
     service = build('calendar', 'v3', credentials=credentials)
+
+    freebusy = service.freebusy().query(body={
+        'timeMin': pending.start_datetime.isoformat() + 'Z',
+        'timeMax': pending.end_datetime.isoformat() + 'Z',
+        'timeZone': 'UTC',
+        'items': [{'id': 'primary'}],
+    }).execute()
+
+    if freebusy['calendars']['primary'].get('busy'):
+        return jsonify({'error': 'Time slot is no longer available'}), 409
 
     event_body = {
         'summary': 'Appointment',

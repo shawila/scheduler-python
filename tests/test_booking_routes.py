@@ -45,11 +45,11 @@ class TestPostBook:
         response = client.post('/book', json=payload)
         assert response.status_code == 400
 
-    def test_duration_not_multiple_of_slot_returns_400(self, client, store):
+    def test_unaligned_end_time_returns_400(self, client, store):
         payload = {**VALID_PAYLOAD, 'start_time': '11:00', 'end_time': '11:45'}
         response = client.post('/book', json=payload)
         assert response.status_code == 400
-        assert 'multiple' in response.json['error']
+        assert 'aligned' in response.json['error']
 
     def test_duration_exceeding_max_returns_400(self, client, store):
         payload = {**VALID_PAYLOAD, 'start_time': '11:00', 'end_time': '14:30'}
@@ -117,6 +117,9 @@ def make_pending(app, token='valid-token-abc', expires_hours=24):
 
 def mock_calendar_service(event_id='google_event_123'):
     service = MagicMock()
+    service.freebusy().query().execute.return_value = {
+        'calendars': {'primary': {'busy': []}}
+    }
     service.events().insert().execute.return_value = {
         'id': event_id,
         'summary': 'Appointment',
@@ -171,3 +174,33 @@ class TestConfirmBooking:
         event_body = insert_call_kwargs['body']
         assert any(a['email'] == 'guest@example.com' for a in event_body['attendees'])
         assert insert_call_kwargs['sendUpdates'] == 'all'
+
+    def test_store_deleted_returns_400(self, client, app):
+        # No store fixture — create pending booking with non-existent store
+        with app.app_context():
+            pending = PendingBooking(
+                confirmation_token='orphan-token',
+                store_email='deleted@example.com',
+                guest_email='guest@example.com',
+                guest_name='John Doe',
+                start_datetime=datetime(2024, 8, 1, 11, 0, 0),
+                end_datetime=datetime(2024, 8, 1, 12, 30, 0),
+                expires_at=datetime.utcnow() + timedelta(hours=24),
+            )
+            db.session.add(pending)
+            db.session.commit()
+        response = client.get('/confirm-booking/orphan-token')
+        assert response.status_code == 400
+        assert 'Store account not found' in response.json['error']
+
+    def test_slot_taken_since_booking_returns_409(self, client, app, store):
+        make_pending(app)
+        busy_service = MagicMock()
+        busy_service.freebusy().query().execute.return_value = {
+            'calendars': {'primary': {'busy': [
+                {'start': '2024-08-01T11:00:00Z', 'end': '2024-08-01T12:30:00Z'}
+            ]}}
+        }
+        with patch('app.booking.routes.build', return_value=busy_service):
+            response = client.get('/confirm-booking/valid-token-abc')
+        assert response.status_code == 409
