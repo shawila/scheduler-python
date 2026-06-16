@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import pickle
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from app.slots import compute_free_slots
 
 # Scope to access Google Calendar
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
@@ -15,7 +16,6 @@ def authenticate_google_calendar():
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             creds = pickle.load(token)
-            breakpoint()
 
     # If there are no valid credentials, request new ones
     if not creds or not creds.valid:
@@ -33,47 +33,20 @@ def authenticate_google_calendar():
     return service
 
 def get_free_timeslots(service, calendar_id='primary', date=datetime.now()):
-    # Define the time range for the specified date
-    start_of_day = datetime(date.year, date.month, date.day, 0, 0, 0).isoformat() + 'Z'  # UTC time
+    start_of_day = datetime(date.year, date.month, date.day, 0, 0, 0).isoformat() + 'Z'
     end_of_day = datetime(date.year, date.month, date.day, 23, 59, 59).isoformat() + 'Z'
 
-    # Get the busy times for the day
     events_result = service.freebusy().query(
         body={
             "timeMin": start_of_day,
             "timeMax": end_of_day,
             "timeZone": "UTC",
-            "items": [{"id": calendar_id}]
+            "items": [{"id": calendar_id}],
         }
     ).execute()
 
     busy_times = events_result['calendars'][calendar_id].get('busy', [])
-
-    # Define 30-minute time slots
-    free_slots = []
-    current_time = datetime(date.year, date.month, date.day, 0, 0, 0)
-    end_time = datetime(date.year, date.month, date.day, 23, 59, 59)
-
-    while current_time + timedelta(minutes=30) <= end_time:
-        slot_start = current_time
-        slot_end = current_time + timedelta(minutes=30)
-
-        # Check if this slot conflicts with any busy time
-        is_free = True
-        for busy in busy_times:
-            busy_start = datetime.fromisoformat(busy['start'][:-1])  # Convert from UTC
-            busy_end = datetime.fromisoformat(busy['end'][:-1])      # Convert from UTC
-            if (slot_start < busy_end) and (slot_end > busy_start):
-                is_free = False
-                break
-
-        if is_free:
-            free_slots.append(f"{slot_start.strftime('%H:%M')} - {slot_end.strftime('%H:%M')}")
-
-        # Move to the next 30-minute interval
-        current_time += timedelta(minutes=30)
-
-    return free_slots
+    return compute_free_slots(busy_times, date)
 
 def main():
     service = authenticate_google_calendar()
