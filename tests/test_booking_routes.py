@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timedelta
 from app.extensions import db
 from app.models.pending_booking import PendingBooking
+from app.models.booking import Booking
 
 
 VALID_PAYLOAD = {
@@ -95,9 +96,6 @@ class TestPostBook:
             pending = PendingBooking.query.filter_by(guest_email='guest@example.com').first()
             assert pending is not None
             assert pending.store_email == 'store@example.com'
-
-
-from app.models.booking import Booking
 
 
 def make_pending(app, token='valid-token-abc', expires_hours=24):

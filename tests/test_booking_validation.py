@@ -1,6 +1,7 @@
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import patch, call, MagicMock
 from app.booking.validation import is_slot_aligned, validate_booking_duration, check_mx_record
+from app.booking.email import send_confirmation_email
 
 START = datetime(2024, 8, 1, 11, 0, 0)
 
@@ -64,10 +65,6 @@ class TestCheckMxRecord:
 
     def test_email_without_at_sign_returns_false(self):
         assert check_mx_record('noatsign') is False
-
-
-from unittest.mock import call, MagicMock
-from app.booking.email import send_confirmation_email
 
 
 class TestSendConfirmationEmail:

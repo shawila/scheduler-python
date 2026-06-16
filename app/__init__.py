@@ -23,6 +23,7 @@ def create_app(config_override=None):
     with app.app_context():
         from app.models.pending_booking import PendingBooking  # noqa: F401
         from app.models.booking import Booking  # noqa: F401
-        db.create_all()
+        if app.config.get('TESTING'):
+            db.create_all()
 
     return app

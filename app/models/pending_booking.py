@@ -4,7 +4,7 @@ from app.extensions import db
 
 class PendingBooking(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    confirmation_token = db.Column(db.String(64), unique=True, nullable=False)
+    confirmation_token = db.Column(db.String(100), unique=True, nullable=False)
     store_email = db.Column(db.String(120), nullable=False)
     guest_email = db.Column(db.String(120), nullable=False)
     guest_name = db.Column(db.String(200), nullable=False)
