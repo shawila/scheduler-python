@@ -20,6 +20,9 @@ def create_app(config_override=None):
     from app.booking.routes import booking_bp
     app.register_blueprint(booking_bp)
 
+    from app.org.routes import org_bp
+    app.register_blueprint(org_bp)
+
     with app.app_context():
         from app.models.pending_booking import PendingBooking  # noqa: F401
         from app.models.booking import Booking  # noqa: F401

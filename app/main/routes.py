@@ -1,49 +1,21 @@
+import secrets
 from datetime import datetime
-from flask import Blueprint, redirect, session, request, jsonify
-from google_auth_oauthlib.flow import Flow
+from flask import Blueprint, request, jsonify
 from googleapiclient.discovery import build
-from app.google_calendar import credentials_from_user
+from app.google_calendar import credentials_from_user, build_oauth_flow
 from app.models.user import User
 from app.extensions import db
 import os
 
 main_bp = Blueprint('main', __name__)
 
-# Allow HTTP for OAuth only in development
 if os.getenv('FLASK_ENV') == 'development':
     os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
-
-CLIENT_SECRETS_FILE = "credentials.json"
-SCOPES = [
-    "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/userinfo.email",
-    "openid",
-]
-REDIRECT_URI = "http://localhost:5000/callback"
-
-
-def _build_flow():
-    return Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
-        scopes=SCOPES,
-        redirect_uri=REDIRECT_URI,
-    )
-
-
-@main_bp.route('/')
-def index():
-    flow = _build_flow()
-    authorization_url, state = flow.authorization_url(
-        access_type='offline',
-        include_granted_scopes='true',
-    )
-    session['state'] = state
-    return redirect(authorization_url)
 
 
 @main_bp.route('/callback')
 def callback():
-    flow = _build_flow()
+    flow = build_oauth_flow()
     flow.fetch_token(authorization_response=request.url)
     credentials = flow.credentials
 
@@ -68,8 +40,9 @@ def callback():
         for key, value in token_data.items():
             setattr(user, key, value)
 
+    user.api_token = secrets.token_urlsafe(32)
     db.session.commit()
-    return "Google Calendar Connected Successfully!"
+    return jsonify({'token': user.api_token})
 
 
 @main_bp.route('/get-busy-hours', methods=['GET'])
@@ -110,5 +83,4 @@ def get_busy_hours():
         for e in events
         if 'dateTime' in e.get('start', {})
     ]
-
     return jsonify(busy_hours)
