@@ -38,3 +38,40 @@ def store(app):
         _db.session.add(user)
         _db.session.commit()
         yield user
+
+
+@pytest.fixture
+def authed_user(app):
+    with app.app_context():
+        user = User(
+            email='owner@example.com',
+            token='gtoken', refresh_token='rtoken',
+            token_uri='https://oauth2.googleapis.com/token',
+            client_id='cid', client_secret='csecret',
+            scopes='https://www.googleapis.com/auth/calendar',
+            api_token='owner-api-token',
+        )
+        _db.session.add(user)
+        _db.session.commit()
+        _db.session.refresh(user)
+        _db.session.expunge(user)
+        return user
+
+
+@pytest.fixture
+def org_with_owner(app, authed_user):
+    from app.models.organization import Organization
+    from app.models.organization_member import OrganizationMember
+    with app.app_context():
+        org = Organization(name='Test Org', google_calendar_id='org-cal-id')
+        _db.session.add(org)
+        _db.session.flush()
+        member = OrganizationMember(
+            org_id=org.id,
+            user_id=authed_user.id,
+            role='owner',
+            priority=1,
+        )
+        _db.session.add(member)
+        _db.session.commit()
+        return org.id
