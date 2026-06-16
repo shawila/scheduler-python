@@ -3,10 +3,10 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify
 from googleapiclient.discovery import build
 from app.extensions import db
-from app.models.customer import Customer
+from app.models.user import User
 from app.models.pending_booking import PendingBooking
 from app.models.booking import Booking
-from app.google_calendar import credentials_from_customer
+from app.google_calendar import credentials_from_user
 from app.booking.validation import is_slot_aligned, validate_booking_duration, check_mx_record
 from app.booking.email import send_confirmation_email
 
@@ -39,14 +39,14 @@ def book():
     if not valid:
         return jsonify({'error': error}), 400
 
-    customer = Customer.query.filter_by(email=data['store_email']).first()
-    if not customer:
+    user = User.query.filter_by(email=data['store_email']).first()
+    if not user:
         return jsonify({'error': 'Store not found'}), 400
 
     if not check_mx_record(data['guest_email']):
         return jsonify({'error': 'Could not verify guest email domain'}), 400
 
-    credentials = credentials_from_customer(customer)
+    credentials = credentials_from_user(user)
     service = build('calendar', 'v3', credentials=credentials)
     freebusy = service.freebusy().query(body={
         'timeMin': start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
@@ -85,10 +85,10 @@ def confirm_booking(token):
     if pending.expires_at < datetime.utcnow():
         return jsonify({'error': 'Confirmation link has expired'}), 410
 
-    customer = Customer.query.filter_by(email=pending.store_email).first()
-    if not customer:
+    user = User.query.filter_by(email=pending.store_email).first()
+    if not user:
         return jsonify({'error': 'Store account not found'}), 400
-    credentials = credentials_from_customer(customer)
+    credentials = credentials_from_user(user)
     service = build('calendar', 'v3', credentials=credentials)
 
     freebusy = service.freebusy().query(body={

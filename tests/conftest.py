@@ -1,7 +1,7 @@
 import pytest
 from app import create_app
 from app.extensions import db as _db
-from app.models.customer import Customer
+from app.models.user import User
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def client(app):
 @pytest.fixture
 def store(app):
     with app.app_context():
-        customer = Customer(
+        user = User(
             email='store@example.com',
             token='fake-token',
             refresh_token='fake-refresh-token',
@@ -35,6 +35,6 @@ def store(app):
             client_secret='fake-client-secret',
             scopes='https://www.googleapis.com/auth/calendar',
         )
-        _db.session.add(customer)
+        _db.session.add(user)
         _db.session.commit()
-        yield customer
+        yield user

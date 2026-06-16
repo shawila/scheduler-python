@@ -2,8 +2,8 @@ from datetime import datetime
 from flask import Blueprint, redirect, session, request, jsonify
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
-from app.google_calendar import credentials_from_customer
-from app.models.customer import Customer
+from app.google_calendar import credentials_from_user
+from app.models.user import User
 from app.extensions import db
 import os
 
@@ -49,9 +49,9 @@ def callback():
 
     oauth2_client = build('oauth2', 'v2', credentials=credentials)
     user_info = oauth2_client.userinfo().get().execute()
-    customer_email = user_info['email']
+    user_email = user_info['email']
 
-    customer = Customer.query.filter_by(email=customer_email).first()
+    user = User.query.filter_by(email=user_email).first()
     token_data = dict(
         token=credentials.token,
         refresh_token=credentials.refresh_token,
@@ -61,12 +61,12 @@ def callback():
         scopes=','.join(credentials.scopes),
     )
 
-    if not customer:
-        customer = Customer(email=customer_email, **token_data)
-        db.session.add(customer)
+    if not user:
+        user = User(email=user_email, **token_data)
+        db.session.add(user)
     else:
         for key, value in token_data.items():
-            setattr(customer, key, value)
+            setattr(user, key, value)
 
     db.session.commit()
     return "Google Calendar Connected Successfully!"
@@ -74,10 +74,10 @@ def callback():
 
 @main_bp.route('/get-busy-hours', methods=['GET'])
 def get_busy_hours():
-    customer_email = request.args.get('email')
+    user_email = request.args.get('email')
     date_str = request.args.get('date', datetime.utcnow().strftime('%Y-%m-%d'))
 
-    if not customer_email:
+    if not user_email:
         return jsonify({'error': 'email parameter is required'}), 400
 
     try:
@@ -85,11 +85,11 @@ def get_busy_hours():
     except ValueError:
         return jsonify({'error': 'Invalid date format. Use YYYY-MM-DD'}), 400
 
-    customer = Customer.query.filter_by(email=customer_email).first()
-    if not customer:
-        return jsonify({'error': 'Customer not found'}), 404
+    user = User.query.filter_by(email=user_email).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
 
-    credentials = credentials_from_customer(customer)
+    credentials = credentials_from_user(user)
     service = build('calendar', 'v3', credentials=credentials)
 
     time_min = date.strftime('%Y-%m-%dT00:00:00Z')
