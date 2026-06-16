@@ -197,3 +197,46 @@ def join_callback():
     db.session.commit()
 
     return jsonify({'token': user.api_token})
+
+
+@org_bp.route('/<int:org_uid>/users/<int:user_id>', methods=['PUT'])
+@require_auth
+def update_member(org_uid, user_id):
+    data = request.get_json() or {}
+    new_role = data.get('role')
+    new_priority = data.get('priority')
+
+    actor_member = OrganizationMember.query.filter_by(
+        user_id=g.current_user.id, org_id=org_uid
+    ).first()
+    if not actor_member:
+        return jsonify({'error': 'Not a member of this org'}), 403
+
+    target_member = OrganizationMember.query.filter_by(
+        user_id=user_id, org_id=org_uid
+    ).first()
+    if not target_member:
+        return jsonify({'error': 'Member not found in this org'}), 404
+
+    actor_rank = ROLE_RANK[actor_member.role]
+    target_rank = ROLE_RANK[target_member.role]
+
+    if actor_rank < ROLE_RANK['manager']:
+        return jsonify({'error': 'Employees cannot update role or priority'}), 403
+
+    if actor_rank == ROLE_RANK['manager']:
+        if target_rank >= ROLE_RANK['manager']:
+            return jsonify({'error': 'Managers can only update employees'}), 403
+        if new_role is not None and new_role != 'employee':
+            return jsonify({'error': 'Managers can only assign employee role'}), 403
+
+    if new_role is not None:
+        if new_role not in ROLE_RANK:
+            return jsonify({'error': 'Invalid role'}), 400
+        target_member.role = new_role
+
+    if new_priority is not None:
+        target_member.priority = int(new_priority)
+
+    db.session.commit()
+    return jsonify({'message': 'Updated'}), 200
