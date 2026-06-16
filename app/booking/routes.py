@@ -1,23 +1,28 @@
 import secrets
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from googleapiclient.discovery import build
 from app.extensions import db
+from app.models.organization import Organization
+from app.models.organization_member import OrganizationMember
 from app.models.user import User
 from app.models.pending_booking import PendingBooking
 from app.models.booking import Booking
 from app.google_calendar import credentials_from_user
 from app.booking.validation import is_slot_aligned, validate_booking_duration, check_mx_record
 from app.booking.email import send_confirmation_email
+from app.org.selection import select_admin
+from app.auth import require_auth
 
 booking_bp = Blueprint('booking', __name__)
 
 
 @booking_bp.route('/book', methods=['POST'])
+@require_auth
 def book():
     data = request.get_json() or {}
 
-    required = ['store_email', 'guest_email', 'guest_name', 'date', 'start_time', 'end_time']
+    required = ['org_uid', 'guest_email', 'guest_name', 'date', 'start_time', 'end_time']
     missing = [f for f in required if not data.get(f)]
     if missing:
         return jsonify({'error': f'Missing fields: {", ".join(missing)}'}), 400
@@ -39,29 +44,25 @@ def book():
     if not valid:
         return jsonify({'error': error}), 400
 
-    user = User.query.filter_by(email=data['store_email']).first()
-    if not user:
-        return jsonify({'error': 'Store not found'}), 400
+    org = Organization.query.get(data['org_uid'])
+    if not org:
+        return jsonify({'error': 'Organization not found'}), 400
 
     if not check_mx_record(data['guest_email']):
         return jsonify({'error': 'Could not verify guest email domain'}), 400
 
-    credentials = credentials_from_user(user)
-    service = build('calendar', 'v3', credentials=credentials)
-    freebusy = service.freebusy().query(body={
-        'timeMin': start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'timeMax': end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'timeZone': 'UTC',
-        'items': [{'id': 'primary'}],
-    }).execute()
+    members = OrganizationMember.query.filter_by(org_id=org.id).all()
+    preferred_id = int(data['user_id']) if data.get('user_id') else None
+    chosen_admin = select_admin(members, start_dt, end_dt, preferred_user_id=preferred_id)
 
-    if freebusy['calendars']['primary'].get('busy'):
-        return jsonify({'error': 'Requested time slot is not available'}), 409
+    if not chosen_admin:
+        return jsonify({'error': 'No admin available for the requested time slot'}), 409
 
     token = secrets.token_urlsafe(32)
     pending = PendingBooking(
         confirmation_token=token,
-        store_email=data['store_email'],
+        org_id=org.id,
+        admin_user_id=chosen_admin.id,
         guest_email=data['guest_email'],
         guest_name=data['guest_name'],
         start_datetime=start_dt,
@@ -85,10 +86,13 @@ def confirm_booking(token):
     if pending.expires_at < datetime.utcnow():
         return jsonify({'error': 'Confirmation link has expired'}), 410
 
-    user = User.query.filter_by(email=pending.store_email).first()
-    if not user:
-        return jsonify({'error': 'Store account not found'}), 400
-    credentials = credentials_from_user(user)
+    admin = User.query.get(pending.admin_user_id)
+    if not admin:
+        return jsonify({'error': 'Admin account not found'}), 400
+
+    org = Organization.query.get(pending.org_id)
+
+    credentials = credentials_from_user(admin)
     service = build('calendar', 'v3', credentials=credentials)
 
     freebusy = service.freebusy().query(body={
@@ -113,9 +117,16 @@ def confirm_booking(token):
         sendUpdates='all',
     ).execute()
 
+    service.events().insert(
+        calendarId=org.google_calendar_id,
+        body={**event_body, 'attendees': []},
+        sendUpdates='none',
+    ).execute()
+
     booking = Booking(
         google_event_id=created_event['id'],
-        store_email=pending.store_email,
+        org_id=pending.org_id,
+        admin_user_id=pending.admin_user_id,
         guest_email=pending.guest_email,
         guest_name=pending.guest_name,
         start_datetime=pending.start_datetime,

@@ -5,15 +5,20 @@ from app.extensions import db
 from app.models.pending_booking import PendingBooking
 from app.models.booking import Booking
 
+OWNER_TOKEN = 'owner-api-token'
 
 VALID_PAYLOAD = {
-    'store_email': 'store@example.com',
+    'org_uid': 1,
     'guest_email': 'guest@example.com',
     'guest_name': 'John Doe',
     'date': '2024-08-01',
     'start_time': '11:00',
     'end_time': '12:30',
 }
+
+
+def auth(token=OWNER_TOKEN):
+    return {'Authorization': f'Bearer {token}'}
 
 
 def mock_free_service():
@@ -25,84 +30,91 @@ def mock_free_service():
 
 
 class TestPostBook:
-    def test_missing_fields_returns_400(self, client, store):
-        response = client.post('/book', json={'store_email': 'store@example.com'})
+    def test_unauthenticated_returns_401(self, client):
+        with patch('app.auth.generate_auth_url', return_value='https://mock'):
+            response = client.post('/book', json=VALID_PAYLOAD)
+        assert response.status_code == 401
+
+    def test_missing_fields_returns_400(self, client, authed_user, org_with_owner):
+        response = client.post('/book',
+                               json={'org_uid': org_with_owner},
+                               headers=auth())
         assert response.status_code == 400
         assert 'Missing' in response.json['error']
 
-    def test_invalid_date_format_returns_400(self, client, store):
-        payload = {**VALID_PAYLOAD, 'date': 'not-a-date'}
-        response = client.post('/book', json=payload)
+    def test_invalid_date_format_returns_400(self, client, authed_user, org_with_owner):
+        payload = {**VALID_PAYLOAD, 'org_uid': org_with_owner, 'date': 'not-a-date'}
+        response = client.post('/book', json=payload, headers=auth())
         assert response.status_code == 400
 
-    def test_unaligned_start_time_returns_400(self, client, store):
-        payload = {**VALID_PAYLOAD, 'start_time': '11:15'}
-        response = client.post('/book', json=payload)
-        assert response.status_code == 400
-        assert 'aligned' in response.json['error']
-
-    def test_end_before_start_returns_400(self, client, store):
-        payload = {**VALID_PAYLOAD, 'start_time': '12:00', 'end_time': '11:00'}
-        response = client.post('/book', json=payload)
-        assert response.status_code == 400
-
-    def test_unaligned_end_time_returns_400(self, client, store):
-        payload = {**VALID_PAYLOAD, 'start_time': '11:00', 'end_time': '11:45'}
-        response = client.post('/book', json=payload)
+    def test_unaligned_start_time_returns_400(self, client, authed_user, org_with_owner):
+        payload = {**VALID_PAYLOAD, 'org_uid': org_with_owner, 'start_time': '11:15'}
+        response = client.post('/book', json=payload, headers=auth())
         assert response.status_code == 400
         assert 'aligned' in response.json['error']
 
-    def test_duration_exceeding_max_returns_400(self, client, store):
-        payload = {**VALID_PAYLOAD, 'start_time': '11:00', 'end_time': '14:30'}
-        response = client.post('/book', json=payload)
+    def test_unaligned_end_time_returns_400(self, client, authed_user, org_with_owner):
+        payload = {**VALID_PAYLOAD, 'org_uid': org_with_owner,
+                   'start_time': '11:00', 'end_time': '11:45'}
+        response = client.post('/book', json=payload, headers=auth())
+        assert response.status_code == 400
+        assert 'aligned' in response.json['error']
+
+    def test_duration_exceeding_max_returns_400(self, client, authed_user, org_with_owner):
+        payload = {**VALID_PAYLOAD, 'org_uid': org_with_owner,
+                   'start_time': '11:00', 'end_time': '14:30'}
+        response = client.post('/book', json=payload, headers=auth())
         assert response.status_code == 400
         assert '180' in response.json['error']
 
-    def test_store_not_found_returns_400(self, client, store):
-        payload = {**VALID_PAYLOAD, 'store_email': 'unknown@example.com'}
-        response = client.post('/book', json=payload)
+    def test_end_before_start_returns_400(self, client, authed_user, org_with_owner):
+        payload = {**VALID_PAYLOAD, 'org_uid': org_with_owner,
+                   'start_time': '12:00', 'end_time': '11:00'}
+        response = client.post('/book', json=payload, headers=auth())
         assert response.status_code == 400
-        assert 'Store not found' in response.json['error']
 
-    def test_mx_check_failure_returns_400(self, client, store):
+    def test_org_not_found_returns_400(self, client, authed_user):
+        payload = {**VALID_PAYLOAD, 'org_uid': 99999}
+        response = client.post('/book', json=payload, headers=auth())
+        assert response.status_code == 400
+        assert 'Organization not found' in response.json['error']
+
+    def test_mx_check_failure_returns_400(self, client, authed_user, org_with_owner):
+        payload = {**VALID_PAYLOAD, 'org_uid': org_with_owner}
         with patch('app.booking.routes.check_mx_record', return_value=False):
-            response = client.post('/book', json=VALID_PAYLOAD)
+            response = client.post('/book', json=payload, headers=auth())
         assert response.status_code == 400
         assert 'email domain' in response.json['error']
 
-    def test_slot_already_taken_returns_409(self, client, store):
-        busy_service = MagicMock()
-        busy_service.freebusy().query().execute.return_value = {
-            'calendars': {'primary': {'busy': [
-                {'start': '2024-08-01T11:00:00Z', 'end': '2024-08-01T12:00:00Z'}
-            ]}}
-        }
+    def test_all_admins_busy_returns_409(self, client, authed_user, org_with_owner):
+        payload = {**VALID_PAYLOAD, 'org_uid': org_with_owner}
         with patch('app.booking.routes.check_mx_record', return_value=True), \
-             patch('app.booking.routes.build', return_value=busy_service):
-            response = client.post('/book', json=VALID_PAYLOAD)
+             patch('app.booking.routes.select_admin', return_value=None):
+            response = client.post('/book', json=payload, headers=auth())
         assert response.status_code == 409
 
-    def test_valid_request_creates_pending_booking(self, client, app, store):
+    def test_valid_request_creates_pending_booking(self, client, app, authed_user, org_with_owner):
+        payload = {**VALID_PAYLOAD, 'org_uid': org_with_owner}
         with patch('app.booking.routes.check_mx_record', return_value=True), \
-             patch('app.booking.routes.build', return_value=mock_free_service()), \
+             patch('app.booking.routes.select_admin', return_value=authed_user), \
              patch('app.booking.routes.send_confirmation_email') as mock_email:
-            response = client.post('/book', json=VALID_PAYLOAD)
-
+            response = client.post('/book', json=payload, headers=auth())
         assert response.status_code == 201
         assert 'guest@example.com' in response.json['message']
         mock_email.assert_called_once()
-
         with app.app_context():
             pending = PendingBooking.query.filter_by(guest_email='guest@example.com').first()
             assert pending is not None
-            assert pending.store_email == 'store@example.com'
+            assert pending.admin_user_id == authed_user.id
+            assert pending.org_id == org_with_owner
 
 
-def make_pending(app, token='valid-token-abc', expires_hours=24):
+def make_pending(app, org_id, admin_user_id, token='valid-token-abc', expires_hours=24):
     with app.app_context():
         pending = PendingBooking(
             confirmation_token=token,
-            store_email='store@example.com',
+            org_id=org_id,
+            admin_user_id=admin_user_id,
             guest_email='guest@example.com',
             guest_name='John Doe',
             start_datetime=datetime(2024, 8, 1, 11, 0, 0),
@@ -115,10 +127,10 @@ def make_pending(app, token='valid-token-abc', expires_hours=24):
 
 def mock_calendar_service(event_id='google_event_123'):
     service = MagicMock()
-    service.freebusy().query().execute.return_value = {
+    service.freebusy.return_value.query.return_value.execute.return_value = {
         'calendars': {'primary': {'busy': []}}
     }
-    service.events().insert().execute.return_value = {
+    service.events.return_value.insert.return_value.execute.return_value = {
         'id': event_id,
         'summary': 'Appointment',
         'start': {'dateTime': '2024-08-01T11:00:00Z'},
@@ -129,56 +141,46 @@ def mock_calendar_service(event_id='google_event_123'):
 
 
 class TestConfirmBooking:
-    def test_unknown_token_returns_404(self, client, store):
+    def test_unknown_token_returns_404(self, client, authed_user, org_with_owner):
         response = client.get('/confirm-booking/nonexistent-token')
         assert response.status_code == 404
 
-    def test_expired_token_returns_410(self, client, app, store):
-        make_pending(app, token='expired-token', expires_hours=-1)
+    def test_expired_token_returns_410(self, client, app, authed_user, org_with_owner):
+        make_pending(app, org_with_owner, authed_user.id, token='expired-token', expires_hours=-1)
         response = client.get('/confirm-booking/expired-token')
         assert response.status_code == 410
 
-    def test_valid_token_returns_200_with_event_details(self, client, app, store):
-        make_pending(app)
+    def test_valid_token_returns_200_with_event_details(self, client, app, authed_user, org_with_owner):
+        make_pending(app, org_with_owner, authed_user.id)
         with patch('app.booking.routes.build', return_value=mock_calendar_service()):
             response = client.get('/confirm-booking/valid-token-abc')
         assert response.status_code == 200
         assert response.json['event_id'] == 'google_event_123'
         assert 'html_link' in response.json
 
-    def test_valid_token_saves_booking_record(self, client, app, store):
-        make_pending(app)
+    def test_valid_token_saves_booking_record(self, client, app, authed_user, org_with_owner):
+        make_pending(app, org_with_owner, authed_user.id)
         with patch('app.booking.routes.build', return_value=mock_calendar_service()):
             client.get('/confirm-booking/valid-token-abc')
         with app.app_context():
             booking = Booking.query.filter_by(guest_email='guest@example.com').first()
             assert booking is not None
             assert booking.google_event_id == 'google_event_123'
+            assert booking.org_id == org_with_owner
 
-    def test_valid_token_deletes_pending_booking(self, client, app, store):
-        make_pending(app)
+    def test_valid_token_deletes_pending_booking(self, client, app, authed_user, org_with_owner):
+        make_pending(app, org_with_owner, authed_user.id)
         with patch('app.booking.routes.build', return_value=mock_calendar_service()):
             client.get('/confirm-booking/valid-token-abc')
         with app.app_context():
-            pending = PendingBooking.query.filter_by(confirmation_token='valid-token-abc').first()
-            assert pending is None
+            assert PendingBooking.query.filter_by(confirmation_token='valid-token-abc').first() is None
 
-    def test_google_event_created_with_guest_as_attendee(self, client, app, store):
-        make_pending(app)
-        service = mock_calendar_service()
-        with patch('app.booking.routes.build', return_value=service):
-            client.get('/confirm-booking/valid-token-abc')
-        insert_call_kwargs = service.events().insert.call_args[1]
-        event_body = insert_call_kwargs['body']
-        assert any(a['email'] == 'guest@example.com' for a in event_body['attendees'])
-        assert insert_call_kwargs['sendUpdates'] == 'all'
-
-    def test_store_deleted_returns_400(self, client, app):
-        # No store fixture — create pending booking with non-existent store
+    def test_admin_not_found_returns_400(self, client, app, org_with_owner):
         with app.app_context():
             pending = PendingBooking(
                 confirmation_token='orphan-token',
-                store_email='deleted@example.com',
+                org_id=org_with_owner,
+                admin_user_id=99999,
                 guest_email='guest@example.com',
                 guest_name='John Doe',
                 start_datetime=datetime(2024, 8, 1, 11, 0, 0),
@@ -189,10 +191,10 @@ class TestConfirmBooking:
             db.session.commit()
         response = client.get('/confirm-booking/orphan-token')
         assert response.status_code == 400
-        assert 'Store account not found' in response.json['error']
+        assert 'Admin account not found' in response.json['error']
 
-    def test_slot_taken_since_booking_returns_409(self, client, app, store):
-        make_pending(app)
+    def test_slot_taken_at_confirmation_returns_409(self, client, app, authed_user, org_with_owner):
+        make_pending(app, org_with_owner, authed_user.id)
         busy_service = MagicMock()
         busy_service.freebusy().query().execute.return_value = {
             'calendars': {'primary': {'busy': [
@@ -202,3 +204,18 @@ class TestConfirmBooking:
         with patch('app.booking.routes.build', return_value=busy_service):
             response = client.get('/confirm-booking/valid-token-abc')
         assert response.status_code == 409
+
+    def test_event_written_to_admin_and_org_calendar(self, client, app, authed_user, org_with_owner):
+        make_pending(app, org_with_owner, authed_user.id)
+        service = mock_calendar_service()
+        with patch('app.booking.routes.build', return_value=service):
+            client.get('/confirm-booking/valid-token-abc')
+        # First insert: admin personal calendar (sendUpdates='all')
+        first_call_kwargs = service.events().insert.call_args_list[0][1]
+        assert any(a['email'] == 'guest@example.com'
+                   for a in first_call_kwargs['body']['attendees'])
+        assert first_call_kwargs['sendUpdates'] == 'all'
+        # Second insert: org shared calendar (sendUpdates='none')
+        second_call_kwargs = service.events().insert.call_args_list[1][1]
+        assert second_call_kwargs['calendarId'] == 'org-cal-id'
+        assert second_call_kwargs['sendUpdates'] == 'none'
