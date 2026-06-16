@@ -10,6 +10,7 @@ class User(db.Model):
     client_id = db.Column(db.String(200), nullable=False)
     client_secret = db.Column(db.String(200), nullable=False)
     scopes = db.Column(db.Text, nullable=False)
+    api_token = db.Column(db.String(100), unique=True, nullable=True)
 
     def __repr__(self):
         return f'<User {self.email}>'

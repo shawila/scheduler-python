@@ -23,6 +23,9 @@ def create_app(config_override=None):
     with app.app_context():
         from app.models.pending_booking import PendingBooking  # noqa: F401
         from app.models.booking import Booking  # noqa: F401
+        from app.models.organization import Organization  # noqa: F401
+        from app.models.organization_member import OrganizationMember  # noqa: F401
+        from app.models.organization_invite import OrganizationInvite  # noqa: F401
         if app.config.get('TESTING'):
             db.create_all()
 
