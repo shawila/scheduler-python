@@ -21,6 +21,8 @@ def create_app(config_override=None):
     app.register_blueprint(booking_bp)
 
     with app.app_context():
+        from app.models.pending_booking import PendingBooking  # noqa: F401
+        from app.models.booking import Booking  # noqa: F401
         db.create_all()
 
     return app
