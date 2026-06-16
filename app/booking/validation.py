@@ -19,6 +19,8 @@ def validate_booking_duration(start: datetime, end: datetime) -> tuple:
 
 
 def check_mx_record(email: str) -> bool:
+    if '@' not in email:
+        return False
     domain = email.split('@')[-1]
     try:
         records = dns.resolver.resolve(domain, 'MX')

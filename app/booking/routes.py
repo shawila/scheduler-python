@@ -49,8 +49,8 @@ def book():
     credentials = credentials_from_customer(customer)
     service = build('calendar', 'v3', credentials=credentials)
     freebusy = service.freebusy().query(body={
-        'timeMin': start_dt.isoformat() + 'Z',
-        'timeMax': end_dt.isoformat() + 'Z',
+        'timeMin': start_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'timeMax': end_dt.strftime('%Y-%m-%dT%H:%M:%SZ'),
         'timeZone': 'UTC',
         'items': [{'id': 'primary'}],
     }).execute()
@@ -73,7 +73,7 @@ def book():
 
     send_confirmation_email(data['guest_email'], data['guest_name'], token)
 
-    return jsonify({'message': f'Confirmation email sent to {data["guest_email"]}'}), 200
+    return jsonify({'message': f'Confirmation email sent to {data["guest_email"]}'}), 201
 
 
 @booking_bp.route('/confirm-booking/<token>', methods=['GET'])
@@ -92,8 +92,8 @@ def confirm_booking(token):
     service = build('calendar', 'v3', credentials=credentials)
 
     freebusy = service.freebusy().query(body={
-        'timeMin': pending.start_datetime.isoformat() + 'Z',
-        'timeMax': pending.end_datetime.isoformat() + 'Z',
+        'timeMin': pending.start_datetime.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'timeMax': pending.end_datetime.strftime('%Y-%m-%dT%H:%M:%SZ'),
         'timeZone': 'UTC',
         'items': [{'id': 'primary'}],
     }).execute()
@@ -103,8 +103,8 @@ def confirm_booking(token):
 
     event_body = {
         'summary': 'Appointment',
-        'start': {'dateTime': pending.start_datetime.isoformat() + 'Z', 'timeZone': 'UTC'},
-        'end': {'dateTime': pending.end_datetime.isoformat() + 'Z', 'timeZone': 'UTC'},
+        'start': {'dateTime': pending.start_datetime.strftime('%Y-%m-%dT%H:%M:%SZ'), 'timeZone': 'UTC'},
+        'end': {'dateTime': pending.end_datetime.strftime('%Y-%m-%dT%H:%M:%SZ'), 'timeZone': 'UTC'},
         'attendees': [{'email': pending.guest_email, 'displayName': pending.guest_name}],
     }
     created_event = service.events().insert(
