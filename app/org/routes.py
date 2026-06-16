@@ -103,3 +103,97 @@ def invite_member(org_uid):
     send_invite_email(invitee_email, org.name, org_uid, token)
 
     return jsonify({'message': f'Invite sent to {invitee_email}'}), 200
+
+
+@org_bp.route('/<int:org_uid>/join/<token>', methods=['GET'])
+def join_org(org_uid, token):
+    invite = OrganizationInvite.query.filter_by(token=token).first()
+    if not invite:
+        return jsonify({'error': 'Invalid invite token'}), 404
+    if invite.org_id != org_uid:
+        return jsonify({'error': 'Invalid invite token for this org'}), 400
+    if invite.expires_at < datetime.utcnow():
+        return jsonify({'error': 'Invite link has expired'}), 410
+
+    session['org_invite_token'] = token
+    flow = build_oauth_flow(redirect_uri=INVITE_REDIRECT_URI)
+    auth_url, state = flow.authorization_url(
+        access_type='offline',
+        include_granted_scopes='true',
+    )
+    session['state'] = state
+    return redirect(auth_url)
+
+
+@org_bp.route('/join-callback', methods=['GET'])
+def join_callback():
+    invite_token = session.pop('org_invite_token', None)
+    if not invite_token:
+        return jsonify({'error': 'No invite in progress'}), 400
+
+    invite = OrganizationInvite.query.filter_by(token=invite_token).first()
+    if not invite or invite.expires_at < datetime.utcnow():
+        return jsonify({'error': 'Invite expired or invalid'}), 410
+
+    flow = build_oauth_flow(redirect_uri=INVITE_REDIRECT_URI)
+    flow.fetch_token(authorization_response=request.url)
+    credentials = flow.credentials
+
+    oauth2_client = build('oauth2', 'v2', credentials=credentials)
+    user_info = oauth2_client.userinfo().get().execute()
+    user_email = user_info['email']
+
+    if user_email != invite.invited_email:
+        return jsonify({'error': 'Email mismatch — please log in with the invited email'}), 400
+
+    token_data = dict(
+        token=credentials.token,
+        refresh_token=credentials.refresh_token,
+        token_uri=credentials.token_uri,
+        client_id=credentials.client_id,
+        client_secret=credentials.client_secret,
+        scopes=','.join(credentials.scopes),
+    )
+
+    user = User.query.filter_by(email=user_email).first()
+    if user:
+        existing_member = OrganizationMember.query.filter_by(user_id=user.id).first()
+        if existing_member:
+            if existing_member.org_id != invite.org_id:
+                return jsonify({'error': 'Already belong to another org'}), 400
+            for key, value in token_data.items():
+                setattr(user, key, value)
+            user.api_token = secrets.token_urlsafe(32)
+            db.session.delete(invite)
+            db.session.commit()
+            return jsonify({'token': user.api_token})
+        for key, value in token_data.items():
+            setattr(user, key, value)
+    else:
+        user = User(email=user_email, **token_data)
+        db.session.add(user)
+
+    user.api_token = secrets.token_urlsafe(32)
+    db.session.flush()
+
+    org = Organization.query.get(invite.org_id)
+    owner_member = OrganizationMember.query.filter_by(org_id=invite.org_id, role='owner').first()
+    if owner_member:
+        owner_creds = credentials_from_user(owner_member.user)
+        cal_service = build('calendar', 'v3', credentials=owner_creds)
+        cal_service.acl().insert(
+            calendarId=org.google_calendar_id,
+            body={'role': 'writer', 'scope': {'type': 'user', 'value': user_email}},
+        ).execute()
+
+    member = OrganizationMember(
+        org_id=invite.org_id,
+        user_id=user.id,
+        role=invite.role,
+        priority=invite.priority,
+    )
+    db.session.add(member)
+    db.session.delete(invite)
+    db.session.commit()
+
+    return jsonify({'token': user.api_token})
