@@ -61,3 +61,29 @@ class TestCheckMxRecord:
     def test_dns_timeout_returns_false(self):
         with patch('app.booking.validation.dns.resolver.resolve', side_effect=Exception('Timeout')):
             assert check_mx_record('guest@example.com') is False
+
+
+from unittest.mock import call
+from app.booking.email import send_confirmation_email
+
+
+class TestSendConfirmationEmail:
+    def test_sends_to_guest_email(self):
+        with patch('app.booking.email.mail') as mock_mail:
+            send_confirmation_email('guest@example.com', 'John Doe', 'abc123token')
+            mock_mail.send.assert_called_once()
+            message = mock_mail.send.call_args[0][0]
+            assert message.recipients == ['guest@example.com']
+
+    def test_subject_contains_confirm(self):
+        with patch('app.booking.email.mail') as mock_mail:
+            send_confirmation_email('guest@example.com', 'John Doe', 'abc123token')
+            message = mock_mail.send.call_args[0][0]
+            assert 'Confirm' in message.subject
+
+    def test_body_contains_confirmation_link_with_token(self):
+        with patch('app.booking.email.mail') as mock_mail:
+            send_confirmation_email('guest@example.com', 'John Doe', 'abc123token')
+            message = mock_mail.send.call_args[0][0]
+            assert 'abc123token' in message.body
+            assert '/confirm-booking/' in message.body
