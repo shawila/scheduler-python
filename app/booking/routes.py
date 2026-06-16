@@ -74,3 +74,49 @@ def book():
     send_confirmation_email(data['guest_email'], data['guest_name'], token)
 
     return jsonify({'message': f'Confirmation email sent to {data["guest_email"]}'}), 200
+
+
+@booking_bp.route('/confirm-booking/<token>', methods=['GET'])
+def confirm_booking(token):
+    pending = PendingBooking.query.filter_by(confirmation_token=token).first()
+    if not pending:
+        return jsonify({'error': 'Invalid confirmation token'}), 404
+
+    if pending.expires_at < datetime.utcnow():
+        return jsonify({'error': 'Confirmation link has expired'}), 410
+
+    customer = Customer.query.filter_by(email=pending.store_email).first()
+    credentials = credentials_from_customer(customer)
+    service = build('calendar', 'v3', credentials=credentials)
+
+    event_body = {
+        'summary': 'Appointment',
+        'start': {'dateTime': pending.start_datetime.isoformat() + 'Z', 'timeZone': 'UTC'},
+        'end': {'dateTime': pending.end_datetime.isoformat() + 'Z', 'timeZone': 'UTC'},
+        'attendees': [{'email': pending.guest_email, 'displayName': pending.guest_name}],
+    }
+    created_event = service.events().insert(
+        calendarId='primary',
+        body=event_body,
+        sendUpdates='all',
+    ).execute()
+
+    booking = Booking(
+        google_event_id=created_event['id'],
+        store_email=pending.store_email,
+        guest_email=pending.guest_email,
+        guest_name=pending.guest_name,
+        start_datetime=pending.start_datetime,
+        end_datetime=pending.end_datetime,
+    )
+    db.session.add(booking)
+    db.session.delete(pending)
+    db.session.commit()
+
+    return jsonify({
+        'event_id': created_event['id'],
+        'title': created_event['summary'],
+        'start': created_event['start']['dateTime'],
+        'end': created_event['end']['dateTime'],
+        'html_link': created_event.get('htmlLink'),
+    }), 200
