@@ -137,7 +137,7 @@ Body: `{ "invitee_email": "...", "role": "employee", "priority": 1 }`
 
 Steps:
 1. Load `OrgMember` for `g.current_customer`. Must be `owner` or `manager`. `403` otherwise.
-2. Managers can only assign role `employee`. Owners can assign `employee` or `manager`. Neither can assign `owner` — that role is set only at org creation and cannot be transferred.
+2. Managers can only assign role `employee`. Owners can assign any role including `owner` (promote) and can demote another owner to `manager` or `employee`.
 3. Check no `OrgMember` exists for `invitee_email` (i.e., no Customer with that email already has an OrgMember). Return `400 "User already belongs to an org"` if so.
 4. Check no existing non-expired `OrgInvite` for `(org_id, invitee_email)`. Return `400 "Invite already pending"` if so.
 5. Create `OrgInvite(org_id, invited_email, role, priority, token=secrets.token_urlsafe(32), expires_at=utcnow+24h)`.
@@ -174,13 +174,14 @@ Body: `{ "role": "...", "priority": 1 }` — all fields optional.
 
 Permission matrix:
 
-| Actor role | Target role | Can update role? | Can update priority? |
+| Actor role | Target | Can update role? | Can update priority? |
 |---|---|---|---|
-| owner | manager or employee | yes | yes |
-| owner | owner | no (cannot demote self) | no |
-| manager | employee | yes | yes |
+| owner | any other member | yes (any role) | yes |
+| manager | employee | yes (`employee` only) | yes |
 | manager | manager or owner | no — 403 | no |
 | employee | themselves | no | no |
+
+Note: no customer delete endpoint in this release. Soft-delete will be added later.
 
 Steps:
 1. Load actor's `OrgMember`. Must belong to an org. Load target's `OrgMember`. Must be in the same org.
