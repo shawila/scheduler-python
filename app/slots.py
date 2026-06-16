@@ -1,14 +1,17 @@
 from datetime import datetime, timedelta
 
+SLOT_DURATION_MINUTES = 30
+MAX_BOOKING_DURATION_MINUTES = 180
+
 
 def compute_free_slots(busy_times: list, date: datetime) -> list:
     free_slots = []
     current_time = datetime(date.year, date.month, date.day, 0, 0, 0)
     end_time = datetime(date.year, date.month, date.day, 23, 59, 59)
 
-    while current_time + timedelta(minutes=30) <= end_time:
+    while current_time + timedelta(minutes=SLOT_DURATION_MINUTES) <= end_time:
         slot_start = current_time
-        slot_end = current_time + timedelta(minutes=30)
+        slot_end = current_time + timedelta(minutes=SLOT_DURATION_MINUTES)
 
         is_free = True
         for busy in busy_times:
@@ -21,6 +24,6 @@ def compute_free_slots(busy_times: list, date: datetime) -> list:
         if is_free:
             free_slots.append(f"{slot_start.strftime('%H:%M')} - {slot_end.strftime('%H:%M')}")
 
-        current_time += timedelta(minutes=30)
+        current_time += timedelta(minutes=SLOT_DURATION_MINUTES)
 
     return free_slots
