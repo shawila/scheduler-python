@@ -1,0 +1,26 @@
+from datetime import datetime, timedelta
+
+
+def compute_free_slots(busy_times: list, date: datetime) -> list:
+    free_slots = []
+    current_time = datetime(date.year, date.month, date.day, 0, 0, 0)
+    end_time = datetime(date.year, date.month, date.day, 23, 59, 59)
+
+    while current_time + timedelta(minutes=30) <= end_time:
+        slot_start = current_time
+        slot_end = current_time + timedelta(minutes=30)
+
+        is_free = True
+        for busy in busy_times:
+            busy_start = datetime.fromisoformat(busy['start'][:-1])
+            busy_end = datetime.fromisoformat(busy['end'][:-1])
+            if slot_start < busy_end and slot_end > busy_start:
+                is_free = False
+                break
+
+        if is_free:
+            free_slots.append(f"{slot_start.strftime('%H:%M')} - {slot_end.strftime('%H:%M')}")
+
+        current_time += timedelta(minutes=30)
+
+    return free_slots

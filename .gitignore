@@ -172,3 +172,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Google OAuth credentials and cached tokens — never commit these
+credentials.json
+token.pickle
+*.pickle
